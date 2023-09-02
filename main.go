@@ -1,3 +1,5 @@
+// Package main implements a simple demo program to
+// work with the csaf_distribution library.
 package main
 
 import (
@@ -41,10 +43,7 @@ func run(files []string) error {
 			changeBranchCategoryToLegacy(adv.ProductTree.Branches)
 		}
 
-		if strings.HasSuffix(file, ".json") {
-			file = file[:len(file)-len(".json")]
-		}
-		file += "_new.json"
+		file = strings.TrimSuffix(file, ".json") + "_new.json"
 
 		if err := csaf.SaveAdvisory(adv, file); err != nil {
 			return fmt.Errorf("saving %q failed: %w", file, err)
