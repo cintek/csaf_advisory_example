@@ -1,47 +1,54 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
-	"regexp"
+	"os"
+	"strings"
 
 	"github.com/csaf-poc/csaf_distribution/v2/csaf"
-	"github.com/jessevdk/go-flags"
 )
 
 func main() {
-	parser := flags.NewParser(nil, flags.Default)
-	parser.Usage = "files..."
-	files, err := parser.Parse()
-
-	if err != nil {
-		log.Printf("Error: %s\n", err)
-		return
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(),
+			"Usage:\n  %s files...\n", os.Args[0])
+		flag.PrintDefaults()
 	}
+	flag.Parse()
 
+	files := flag.Args()
 	if len(files) == 0 {
 		log.Println("No files given.")
 		return
 	}
-
-	run(files)
+	if err := run(files); err != nil {
+		log.Fatalf("error: %v\n", err)
+	}
 }
 
-// Opens files, calls function to edit them and saves them as different files.
+// run opens files, calls function to edit them and saves them as different files.
 func run(files []string) error {
-	regex := regexp.MustCompile(`.json$`)
+
 	for _, file := range files {
-		adv, errorLoading := csaf.LoadAdvisory(file)
-		if errorLoading != nil {
-			log.Printf("err: %s\n", errorLoading)
-			return nil
+		adv, err := csaf.LoadAdvisory(file)
+		if err != nil {
+			return fmt.Errorf("loading %q failed: %w", file, err)
 		}
 
 		if adv.ProductTree != nil {
 			changeBranchCategoryToLegacy(adv.ProductTree.Branches)
 		}
 
-		name := regex.ReplaceAllString(file, "")
-		csaf.SaveAdvisory(adv, name+"_new.json")
+		if strings.HasSuffix(file, ".json") {
+			file = file[:len(file)-len(".json")]
+		}
+		file += "_new.json"
+
+		if err := csaf.SaveAdvisory(adv, file); err != nil {
+			return fmt.Errorf("saving %q failed: %w", file, err)
+		}
 	}
 
 	return nil
