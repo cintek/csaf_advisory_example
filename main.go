@@ -104,10 +104,9 @@ func (uf *urlFinder) findURLs(adv *csaf.Advisory) {
 	// First iterate over full product names.
 	if names := tree.FullProductNames; names != nil {
 		for _, name := range *names {
-			if name == nil || name.ProductID == nil {
-				continue
+			if name != nil && name.ProductID != nil {
+				add(slices.Index(uf.ids, *name.ProductID), name.ProductIdentificationHelper)
 			}
-			add(slices.Index(uf.ids, *name.ProductID), name.ProductIdentificationHelper)
 		}
 	}
 
