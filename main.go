@@ -32,98 +32,96 @@ func main() {
 	}
 }
 
-// idPurlDict stores a product id and the PURLs belonging to the product.
-type idPurlDict struct {
-	ID    string
-	PURLs []string
-}
-
-// idPurlDicts is a list of idPurlDict elements.
-type idPurlDicts []idPurlDict
-
-// Add adds the given PURLs to a idPurlDict which has the given Product ID.
-func (dicts idPurlDicts) Add(id string, purls ...string) idPurlDicts {
-	for i, d := range dicts {
-		if d.ID == id {
-			dicts[i].PURLs = append(d.PURLs, purls...)
-			return dicts
-		}
-	}
-	newDict := idPurlDict{
-		ID:    id,
-		PURLs: purls,
-	}
-
-	return append(dicts, newDict)
-}
-
 // run prints PURLs belonging to the given Product IDs.
-func run(files []string, idsString string) error {
+func run(files []string, ids string) error {
+
+	uf := newURLFinder(strings.Split(ids, ","))
+
 	for _, file := range files {
 		adv, err := csaf.LoadAdvisory(file)
 		if err != nil {
 			return fmt.Errorf("loading %q failed: %w", file, err)
 		}
-
-		if idsString != "" {
-			ids := strings.Split(idsString, ",")
-			dict := findProductPackageUrls(adv, ids)
-			fmt.Println("Found the following PURLs")
-			for _, d := range dict {
-				fmt.Printf("Product ID %s:\n", d.ID)
-				for i, p := range d.PURLs {
-					fmt.Printf("%d. %s\n", i+1, p)
-				}
-				fmt.Println()
-			}
-		}
+		uf.findURLs(adv)
+		uf.dumpURLs()
+		uf.clear()
 	}
 
 	return nil
 }
 
-// findProductPackageUrls uses the given (product) ids to find the appropriate
-// PURLs in the product tree of the given CSAF advisory.
-func findProductPackageUrls(adv *csaf.Advisory, ids []string) []idPurlDict {
-	var dict idPurlDicts
-	if tree := adv.ProductTree; tree != nil {
-		if names := tree.FullProductNames; names != nil {
-			for _, name := range *names {
-				if slices.Contains(ids, string(*name.ProductID)) {
-					if helper := name.ProductIdentificationHelper; helper == nil {
-						if helper.PURL != nil {
-							dict = dict.Add(string(*name.ProductID), string(*helper.PURL))
-						}
-					}
-				}
-			}
-		}
-		if branches := tree.Branches; branches != nil {
-			newURLs := findPURLsInBranches(branches, ids)
-			dict = append(dict, newURLs...)
-		}
-	}
-	return dict
+// urlFinder helps to find the URLs of a set of product ids in advisories.
+type urlFinder struct {
+	ids  []csaf.ProductID
+	urls [][]csaf.PURL
 }
 
-// findPURLsInBranches uses the given (product) ids to find the appropriate
-// PURLs in a list of branches of a CSAF advisory.
-func findPURLsInBranches(branches csaf.Branches, ids []string) []idPurlDict {
-	var dict idPurlDicts
-	for _, branch := range branches {
-		if name := branch.Product; name != nil {
-			if slices.Contains(ids, string(*name.ProductID)) {
-				if helper := name.ProductIdentificationHelper; helper != nil {
-					if helper.PURL != nil {
-						dict = dict.Add(string(*name.ProductID), string(*helper.PURL))
-					}
-				}
-			}
+// newURLFinder creates a new urlFinder for given ids.
+func newURLFinder(ids []string) *urlFinder {
+	uf := &urlFinder{
+		ids:  make([]csaf.ProductID, len(ids)),
+		urls: make([][]csaf.PURL, len(ids)),
+	}
+	for i := range uf.ids {
+		uf.ids[i] = csaf.ProductID(ids[i])
+	}
+	return uf
+}
+
+// clear resets the url finder after a run on an advisory.
+func (uf *urlFinder) clear() {
+	clear(uf.urls)
+}
+
+// dumpURLs dumps the found URLs to stdout.
+func (uf *urlFinder) dumpURLs() {
+	for i, id := range uf.ids {
+		if len(uf.urls) == 0 {
+			continue
 		}
-		if branch.Branches != nil {
-			newURLs := findPURLsInBranches(branch.Branches, ids)
-			dict = append(dict, newURLs...)
+		fmt.Printf("Found URLs for %s:\n", id)
+		for j, url := range uf.urls[i] {
+			fmt.Printf("%d. %s\n", j+1, url)
 		}
 	}
-	return dict
+}
+
+// findURLs find the URLs in an advisory.
+func (uf *urlFinder) findURLs(adv *csaf.Advisory) {
+	tree := adv.ProductTree
+	if tree == nil {
+		return
+	}
+
+	// If we have found it and we have a valid URL add unique.
+	add := func(idx int, h *csaf.ProductIdentificationHelper) {
+		if idx != -1 && h != nil && h.PURL != nil &&
+			!slices.Contains(uf.urls[idx], *h.PURL) {
+			uf.urls[idx] = append(uf.urls[idx], *h.PURL)
+		}
+	}
+
+	// First iterate over full product names.
+	if names := tree.FullProductNames; names != nil {
+		for _, name := range *names {
+			if name == nil || name.ProductID == nil {
+				continue
+			}
+			add(slices.Index(uf.ids, *name.ProductID), name.ProductIdentificationHelper)
+		}
+	}
+
+	// Second traverse the branches recursively.
+	var recBranch func(*csaf.Branch)
+	recBranch = func(b *csaf.Branch) {
+		if p := b.Product; p != nil && p.ProductID != nil {
+			add(slices.Index(uf.ids, *p.ProductID), p.ProductIdentificationHelper)
+		}
+		for _, c := range b.Branches {
+			recBranch(c)
+		}
+	}
+	for _, b := range tree.Branches {
+		recBranch(b)
+	}
 }
