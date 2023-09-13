@@ -76,7 +76,7 @@ func (uf *urlFinder) clear() {
 // dumpURLs dumps the found URLs to stdout.
 func (uf *urlFinder) dumpURLs() {
 	for i, id := range uf.ids {
-		if len(uf.urls) == 0 {
+		if len(uf.urls[i]) == 0 {
 			continue
 		}
 		fmt.Printf("Found URLs for %s:\n", id)
